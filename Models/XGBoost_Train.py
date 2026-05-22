@@ -16,7 +16,6 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
     ]
     
     feature_cols = [col for col in df.columns if col not in exclude_cols]
-    
     X = df[feature_cols]
     y = df['Target']
 
@@ -25,29 +24,26 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
     param_grid = {
-        'n_estimators': [100, 200, 300],
-        'max_depth': [3, 5, 7, 9],
-        'learning_rate': [0.01, 0.05, 0.1, 0.2],
-        'subsample': [0.6, 0.8, 1.0],
-        'colsample_bytree': [0.6, 0.8, 1.0]
+        'n_estimators': [200, 400, 600],
+        'max_depth': [3, 4, 5],
+        'learning_rate': [0.03, 0.05, 0.1],
+        'subsample': [0.7, 0.85, 1.0],
+        'colsample_bytree': [0.7, 0.85, 1.0],
+        'min_child_weight': [1, 5, 10],
+        'gamma': [0, 0.5, 1.0]
     }
 
-    # Generate 50 random combinations from the grid
-    param_list = list(ParameterSampler(param_grid, n_iter=50, random_state=42))
+    param_list = list(ParameterSampler(param_grid, n_iter=30, random_state=42))
     tscv = TimeSeriesSplit(n_splits=5)
     
     all_results = []
     best_score = 0
     best_params = None
 
-    print("Initiating Custom Time-Series Hyperparameter Search...\n")
+    print("Initiating Time-Series Hyperparameter Search...\n")
 
-    # Custom Loop to print every run
     for i, params in enumerate(param_list, 1):
-        print(f"Run {i}/50 | Hyperparameters: {params}")
-        
         fold_accuracies = []
-        
         for train_idx, val_idx in tscv.split(X_train):
             X_fold_train, X_fold_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_fold_train, y_fold_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
@@ -59,14 +55,12 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
             fold_accuracies.append(accuracy_score(y_fold_val, preds))
             
         avg_acc = np.mean(fold_accuracies)
-        print(f"--> Result: {avg_acc * 100:.2f}% Accuracy\n")
+        print(f"Run {i}/30 | {avg_acc * 100:.2f}% | {params}")
         
-        # Save results for Excel
         run_data = params.copy()
         run_data['Mean_Accuracy'] = avg_acc
         all_results.append(run_data)
         
-        # Track the best model
         if avg_acc > best_score:
             best_score = avg_acc
             best_params = params
@@ -76,30 +70,45 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
     
     results_df = pd.DataFrame(all_results).sort_values(by='Mean_Accuracy', ascending=False)
     results_df.to_excel(excel_path, index=False)
-    print(f"All 50 runs saved to: {excel_path}")
-
+    
     print("\n--- Optimal Hyperparameters Found ---")
     print(best_params)
-    print(f"Cross-Validation Accuracy: {best_score * 100:.2f}%")
 
-    # Train final model on the entire 80% using the best parameters
     print("\nTraining final model and evaluating on unseen 20% Test Set...")
     final_model = XGBClassifier(**best_params, random_state=42, eval_metric='logloss', n_jobs=-1)
     final_model.fit(X_train, y_train, verbose=False)
 
-    predictions = final_model.predict(X_test)
-    final_accuracy = accuracy_score(y_test, predictions)
+    probabilities = final_model.predict_proba(X_test)[:, 1]
+    CONFIDENCE_THRESHOLD = 0.58 
+
+    take_trade_mask = (probabilities > CONFIDENCE_THRESHOLD) | (probabilities < (1 - CONFIDENCE_THRESHOLD))
+    y_test_sniper = y_test[take_trade_mask]
+    preds_sniper = (probabilities[take_trade_mask] > 0.5).astype(int)
+
+    print("\n--- Live Environment Simulation (Sniper Execution) ---")
+    print(f"Total possible intervals: {len(y_test)}")
+    print(f"Trades taken (Confidence > {CONFIDENCE_THRESHOLD}): {len(y_test_sniper)}")
     
-    print(f"\nFinal Live-Environment Accuracy: {final_accuracy * 100:.2f}%\n")
-    print(classification_report(y_test, predictions))
+    if len(y_test_sniper) > 0:
+        final_accuracy = accuracy_score(y_test_sniper, preds_sniper)
+        print(f"\nFinal High-Confidence Accuracy: {final_accuracy * 100:.2f}%\n")
+        print(classification_report(y_test_sniper, preds_sniper))
+    else:
+        print("\nNo trades met the confidence threshold.")
+
+    model_path = results_dir.parent.parent / "Models" / "kuru_live_model.json"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    final_model.save_model(str(model_path))
+    print(f"\nModel saved for deployment at: {model_path}")
     
     return final_model
 
-BASE_DIR = Path(__file__).resolve().parent
-FEATURES_CSV_PATH = (BASE_DIR / ".." / "Datasets" / "kuru_features_btc_15m.csv").resolve()
-RESULTS_DIR = (BASE_DIR / ".." / "results" / "xlsx").resolve()
+if __name__ == "__main__":
+    BASE_DIR = Path(__file__).resolve().parent
+    FEATURES_CSV_PATH = (BASE_DIR / ".." / "Datasets" / "kuru_features_btc_15m.csv").resolve()
+    RESULTS_DIR = (BASE_DIR / ".." / "results" / "xlsx").resolve()
 
-if FEATURES_CSV_PATH.exists():
-    best_live_model = tune_and_train_kuru(FEATURES_CSV_PATH, RESULTS_DIR)
-else:
-    print(f"File not found: {FEATURES_CSV_PATH}")
+    if FEATURES_CSV_PATH.exists():
+        best_live_model = tune_and_train_kuru(FEATURES_CSV_PATH, RESULTS_DIR)
+    else:
+        print(f"File not found: {FEATURES_CSV_PATH}")

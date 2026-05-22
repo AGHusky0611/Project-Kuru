@@ -36,21 +36,21 @@ class KuruMasterTrainer:
 
     def execute_all(self):
         grid_15m = {
-            "n_estimators": [200, 400, 600],
-            "max_depth": [3, 4, 5],
-            "learning_rate": [0.01, 0.05, 0.1],
-            "subsample": [0.6, 0.8],
-            "colsample_bytree": [0.6, 0.8],
+        "n_estimators": [200, 400, 600],
+        "max_depth": [3, 4, 5],
+        "learning_rate": [0.01, 0.05, 0.1],
+        "subsample": [0.6, 0.8],
+        "colsample_bytree": [0.6, 0.8],
         }
         self.train_timeframe("15m", "btc_15m_data_2018_to_2025.csv", 0.001, grid_15m, 10)
 
         grid_60m = {
-            "n_estimators": [100, 200, 300],
-            "max_depth": [2, 3, 4, 5],
-            "learning_rate": [0.01, 0.05, 0.1],
-            "subsample": [0.6, 0.8],
-            "colsample_bytree": [0.6, 0.8],
-        }
+        "n_estimators": [100, 200, 300],
+        "max_depth": [2, 3, 4, 5],
+        "learning_rate": [0.01, 0.05, 0.1],
+        "subsample": [0.6, 0.8],
+        "colsample_bytree": [0.6, 0.8],
+    }
         self.train_timeframe("1h", "btc_1h_data_2018_to_2025.csv", 0.002, grid_60m, 10)
 
 if __name__ == "__main__":

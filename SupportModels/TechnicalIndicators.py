@@ -22,6 +22,7 @@ def engineer_kuru_features(input_path: Path, output_path: Path, noise_threshold:
     df['Return'] = df['Close'].pct_change()
     df['Return_Lag_1'] = df['Return'].shift(1)
     df['Return_Lag_2'] = df['Return'].shift(2)
+    df['Return_Lag_3'] = df['Return'].shift(3)
     df['Rolling_Vol_14'] = df['Return'].rolling(window=14).std()
 
     df['Hour'] = df.index.hour
@@ -39,23 +40,18 @@ def engineer_kuru_features(input_path: Path, output_path: Path, noise_threshold:
     return df
 
 def engineer_live_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Processes live API data for prediction without generating a Target column."""
-    
-    # Calculate Custom Metrics
     df['Buyer_Aggression'] = df['Taker buy base asset volume'] / df['Volume']
     df['Avg_Trade_Size'] = df['Volume'] / df['Number of trades']
     taker_avg_price = df['Taker buy quote asset volume'] / df['Taker buy base asset volume']
     df['Taker_Price_Premium'] = taker_avg_price - df['Close']
     df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    # Standard Indicators
     df.ta.ema(length=9, append=True)
     df.ta.ema(length=21, append=True)
     df.ta.rsi(length=14, append=True)
     df.ta.macd(fast=12, slow=26, signal=9, append=True)
     df.ta.atr(length=14, append=True)
 
-    # Lagging Features
     df['Return'] = df['Close'].pct_change()
     df['Return_Lag_1'] = df['Return'].shift(1)
     df['Return_Lag_2'] = df['Return'].shift(2)
@@ -65,8 +61,7 @@ def engineer_live_features(df: pd.DataFrame) -> pd.DataFrame:
     df['Hour'] = df.index.hour
     df['DayOfWeek'] = df.index.dayofweek
 
-    # Clean up and return ONLY the latest valid row for prediction
     df = df.drop(columns=['Return'])
     df = df.dropna()
     
-    return df.iloc[[-1]] # Return only the most recent completed candle
+    return df.iloc[[-1]]

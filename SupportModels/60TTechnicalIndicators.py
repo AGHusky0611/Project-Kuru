@@ -3,7 +3,7 @@ import pandas_ta as ta
 import numpy as np
 from pathlib import Path
 
-def engineer_kuru_features(input_path: Path, output_path: Path) -> pd.DataFrame:
+def engineer_kuru_features(input_path: Path, output_path: Path, noise_threshold: float = 0.002) -> pd.DataFrame:
     df = pd.read_csv(input_path, index_col='Open time', parse_dates=True)
     df = df[~df.index.duplicated(keep='last')]
 
@@ -28,7 +28,6 @@ def engineer_kuru_features(input_path: Path, output_path: Path) -> pd.DataFrame:
     df['DayOfWeek'] = df.index.dayofweek
 
     df['Next_Return'] = df['Return'].shift(-1)
-    noise_threshold = 0.002 # Slightly higher noise threshold for 1-hour candles
     df = df[df['Next_Return'].abs() > noise_threshold]
     df['Target'] = (df['Next_Return'] > 0).astype(int)
 

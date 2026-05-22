@@ -5,7 +5,13 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import ParameterSampler, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, classification_report
 
-def tune_and_train_kuru(features_path: Path, results_dir: Path):
+def tune_and_train_kuru(
+    features_path: Path,
+    results_dir: Path,
+    model_name: str,
+    param_grid: dict,
+    n_iter: int
+):
     df = pd.read_csv(features_path, index_col='Open time', parse_dates=True)
 
     exclude_cols = [
@@ -23,17 +29,7 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
-    param_grid = {
-        'n_estimators': [200, 400, 600],
-        'max_depth': [3, 4, 5],
-        'learning_rate': [0.03, 0.05, 0.1],
-        'subsample': [0.7, 0.85, 1.0],
-        'colsample_bytree': [0.7, 0.85, 1.0],
-        'min_child_weight': [1, 5, 10],
-        'gamma': [0, 0.5, 1.0]
-    }
-
-    param_list = list(ParameterSampler(param_grid, n_iter=30, random_state=42))
+    param_list = list(ParameterSampler(param_grid, n_iter=n_iter, random_state=42))
     tscv = TimeSeriesSplit(n_splits=5)
     
     all_results = []
@@ -55,7 +51,7 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
             fold_accuracies.append(accuracy_score(y_fold_val, preds))
             
         avg_acc = np.mean(fold_accuracies)
-        print(f"Run {i}/30 | {avg_acc * 100:.2f}% | {params}")
+        print(f"Run {i}/{n_iter} | {avg_acc * 100:.2f}% | {params}")
         
         run_data = params.copy()
         run_data['Mean_Accuracy'] = avg_acc
@@ -96,7 +92,7 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path):
     else:
         print("\nNo trades met the confidence threshold.")
 
-    model_path = results_dir.parent.parent / "Models" / "kuru_live_model.json"
+    model_path = results_dir.parent.parent / "Models" / model_name
     model_path.parent.mkdir(parents=True, exist_ok=True)
     final_model.save_model(str(model_path))
     print(f"\nModel saved for deployment at: {model_path}")
@@ -109,6 +105,24 @@ if __name__ == "__main__":
     RESULTS_DIR = (BASE_DIR / ".." / "results" / "xlsx").resolve()
 
     if FEATURES_CSV_PATH.exists():
-        best_live_model = tune_and_train_kuru(FEATURES_CSV_PATH, RESULTS_DIR)
+        param_grid = {
+            'n_estimators': [200, 400, 600],
+            'max_depth': [3, 4, 5],
+            'learning_rate': [0.03, 0.05, 0.1],
+            'subsample': [0.7, 0.85, 1.0],
+            'colsample_bytree': [0.7, 0.85, 1.0],
+            'min_child_weight': [1, 5, 10],
+            'gamma': [0, 0.5, 1.0]
+        }
+        n_iter = 30
+        model_name = "kuru_live_model_15m.json"
+
+        best_live_model = tune_and_train_kuru(
+            FEATURES_CSV_PATH,
+            RESULTS_DIR,
+            model_name,
+            param_grid,
+            n_iter
+        )
     else:
         print(f"File not found: {FEATURES_CSV_PATH}")

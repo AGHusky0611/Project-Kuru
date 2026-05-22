@@ -3,6 +3,74 @@ from datetime import datetime
 from pathlib import Path
 from xgboost import XGBClassifier
 
+import time
+import ccxt
+import pandas as pd
+from datetime import datetime
+from pathlib import Path
+from xgboost import XGBClassifier
+from SupportModels.TechnicalIndicators import engineer_live_features
+
+# 1. Initialize Exchange (Use Testnet for safety)
+exchange = ccxt.binance({
+    'apiKey': 'YOUR_BINANCE_TESTNET_API_KEY',
+    'secret': 'YOUR_BINANCE_TESTNET_SECRET',
+    'enableRateLimit': True,
+})
+exchange.set_sandbox_mode(True) # Connects to Binance Testnet
+
+SYMBOL = 'BTC/USDT'
+TRADE_SIZE = 0.01 # Amount of BTC to buy
+
+def fetch_live_data(timeframe: str) -> pd.DataFrame:
+    """Fetches the last 50 candles to calculate 21-EMA and 14-RSI correctly."""
+    bars = exchange.fetch_ohlcv(SYMBOL, timeframe, limit=50)
+    
+    df = pd.DataFrame(bars, columns=['Open time', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    df['Open time'] = pd.to_datetime(df['Open time'], unit='ms')
+    df = df.set_index('Open time')
+    
+    # Mocking Binance Order Book data for live execution
+    # In a full production environment, fetch actual taker volumes via WebSocket
+    df['Number of trades'] = 1000 
+    df['Taker buy base asset volume'] = df['Volume'] * 0.5 
+    df['Taker buy quote asset volume'] = df['Volume'] * df['Close'] * 0.5
+    
+    return df
+
+def execute_trade(direction: str):
+    """Sends the actual execution order to the exchange."""
+    try:
+        if direction == 'LONG':
+            print(f"[EXECUTING] Market BUY {TRADE_SIZE} {SYMBOL}")
+            exchange.create_market_buy_order(SYMBOL, TRADE_SIZE)
+            # Add Stop Loss logic here
+    except Exception as e:
+        print(f"[API ERROR] Failed to execute trade: {e}")
+
+def run_live_inference(model, timeframe: str):
+    print(f"Fetching live {timeframe} data...")
+    raw_df = fetch_live_data(timeframe)
+    
+    # Process features
+    live_features = engineer_live_features(raw_df)
+    
+    # Drop columns not used in training
+    exclude_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'Number of trades', 'Taker buy base asset volume', 'Taker buy quote asset volume']
+    X_live = live_features.drop(columns=[c for c in exclude_cols if c in live_features.columns])
+    
+    # Predict Probability
+    prob_up = model.predict_proba(X_live)
+    
+    print(f"[{timeframe}] Model Confidence for UP: {prob_up * 100:.2f}%")
+    
+    # Sniper Execution Logic
+    if prob_up > 0.60:
+        print(f"[{timeframe}] HIGH CONFIDENCE BULLISH SIGNAL DETECTED.")
+        execute_trade('LONG')
+    else:
+        print(f"[{timeframe}] No trade conditions met. Standing by.")
+
 def load_models():
     BASE_DIR = Path(__file__).resolve().parent
     model_dir = (BASE_DIR / "Models").resolve()

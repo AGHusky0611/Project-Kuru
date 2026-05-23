@@ -10,7 +10,7 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str,
 
     exclude_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'Quote asset volume', 'Number of trades', 'Taker buy base asset volume', 'Taker buy quote asset volume', 'Close time', 'Target']
     feature_cols = [col for col in df.columns if col not in exclude_cols]
-    
+
     X = df[feature_cols]
     y = df['Target']
 
@@ -22,30 +22,59 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str,
     tscv = TimeSeriesSplit(n_splits=5)
     best_score, best_params = 0, None
 
-    for i, params in enumerate(param_list, 1):
-        fold_accuracies = []
+    for params in param_list:
+        fold_scores = []
         for train_idx, val_idx in tscv.split(X_train):
             X_fold_train, X_fold_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_fold_train, y_fold_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
-            
+
             model = XGBClassifier(**params, random_state=42, eval_metric='logloss', n_jobs=-1)
             model.fit(X_fold_train, y_fold_train, verbose=False)
-            preds = model.predict(X_fold_val)
-            fold_accuracies.append(accuracy_score(y_fold_val, preds))
-            
-        avg_acc = np.mean(fold_accuracies)
-        if avg_acc > best_score:
-            best_score = avg_acc
+
+            probs = model.predict_proba(X_fold_val)[:, 1]
+            thr = 0.6
+            take = (probs > thr) | (probs < (1 - thr))
+            if take.sum() == 0:
+                fold_scores.append(0.0)
+            else:
+                preds = (probs[take] > 0.5).astype(int)
+                fold_scores.append(accuracy_score(y_fold_val[take], preds))
+
+        avg_score = np.mean(fold_scores)
+        if avg_score > best_score:
+            best_score = avg_score
             best_params = params
 
     print(f"\n--- Optimal Hyperparameters Found ---")
     print(best_params)
 
+    # Train on most of training data, tune threshold on validation tail
+    val_split = int(len(X_train) * 0.8)
+    X_tr, X_val = X_train.iloc[:val_split], X_train.iloc[val_split:]
+    y_tr, y_val = y_train.iloc[:val_split], y_train.iloc[val_split:]
+
     final_model = XGBClassifier(**best_params, random_state=42, eval_metric='logloss', n_jobs=-1)
+    final_model.fit(X_tr, y_tr, verbose=False)
+
+    val_probs = final_model.predict_proba(X_val)[:, 1]
+    thresholds = np.arange(0.55, 0.85, 0.01)
+    best_thr, best_prec = 0.6, 0.0
+    for thr in thresholds:
+        take = (val_probs > thr) | (val_probs < (1 - thr))
+        if take.sum() == 0:
+            continue
+        preds = (val_probs[take] > 0.5).astype(int)
+        prec = accuracy_score(y_val[take], preds)
+        if prec > best_prec:
+            best_prec, best_thr = prec, thr
+
+    print(f"Chosen confidence threshold: {best_thr:.2f} (val win rate {best_prec * 100:.2f}%)")
+
+    # Retrain on full training set
     final_model.fit(X_train, y_train, verbose=False)
 
     probabilities = final_model.predict_proba(X_test)[:, 1]
-    CONFIDENCE_THRESHOLD = 0.58 
+    CONFIDENCE_THRESHOLD = best_thr
 
     take_trade_mask = (probabilities > CONFIDENCE_THRESHOLD) | (probabilities < (1 - CONFIDENCE_THRESHOLD))
     y_test_sniper = y_test[take_trade_mask]
@@ -60,5 +89,25 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str,
     model_path = results_dir.parent.parent / "Models" / model_name
     model_path.parent.mkdir(parents=True, exist_ok=True)
     final_model.save_model(str(model_path))
-    
+
     return final_model
+
+grid_15m = {
+    "n_estimators": [200, 400, 600],
+    "max_depth": [2, 3, 4],
+    "learning_rate": [0.01, 0.05],
+    "subsample": [0.6, 0.8],
+    "colsample_bytree": [0.6, 0.8],
+    "min_child_weight": [5, 10],
+    "gamma": [0, 0.5, 1],
+    "reg_alpha": [0, 0.1],
+    "reg_lambda": [1, 2],
+}
+
+tune_and_train_kuru(
+    features_path=Path("data/processed/15m_features.csv"),
+    results_dir=Path("results/15m_kuru/"),
+    model_name="kuru_15m",
+    param_grid=grid_15m,
+    n_iter=50
+)

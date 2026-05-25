@@ -1,5 +1,7 @@
 import time
+import os
 import json
+import csv
 import logging
 import ccxt
 import pandas as pd
@@ -15,9 +17,14 @@ logging.basicConfig(
 )
 
 # 1. Initialize Exchange (Use Testnet for safety)
+api_key = os.getenv("KURU_API_KEY")
+api_secret = os.getenv("KURU_API_SECRET")
+if not api_key or not api_secret:
+    raise ValueError("Missing KURU_API_KEY or KURU_API_SECRET environment variables.")
+
 exchange = ccxt.binance({
-    'apiKey': 'ZBVc7j20BwFto28WfpDon6H699G3q0rHec86ATuccDCTudLowh7yWos5dFfuUim2',
-    'secret': 'f7FCayXXY38LntKYHv5TJB0gNe4BGAujTeA2uK538B8OVsHrGpTDcsmmBBbLcfGl',
+    'apiKey': api_key,
+    'secret': api_secret,
     'enableRateLimit': True,
 })
 exchange.set_sandbox_mode(True) 
@@ -28,6 +35,41 @@ TRADE_SIZE = 0.01
 starting_balance = None
 cooldown_candles = 0
 entry_price = None
+entry_time = None
+
+DATA_DIR = Path("data")
+TRADES_CSV = DATA_DIR / "trades.csv"
+TRADES_JSONL = DATA_DIR / "trades.jsonl"
+SIGNALS_JSONL = DATA_DIR / "signals.jsonl"
+
+def utc_now_iso() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds")
+
+def append_jsonl(path: Path, payload: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a', encoding='utf-8') as handle:
+        handle.write(json.dumps(payload) + "\n")
+
+def append_trade_csv(payload: dict):
+    TRADES_CSV.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = TRADES_CSV.exists()
+    with TRADES_CSV.open('a', newline='', encoding='utf-8') as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(payload.keys()))
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(payload)
+
+def record_trade(payload: dict):
+    append_trade_csv(payload)
+    append_jsonl(TRADES_JSONL, payload)
+
+def record_signal(timeframe: str, prob_up: float):
+    payload = {
+        "timestamp": utc_now_iso(),
+        "timeframe": timeframe,
+        "confidence": round(prob_up * 100, 4)
+    }
+    append_jsonl(SIGNALS_JSONL, payload)
 
 def safe_fetch(fn, retries=3):
     for i in range(retries):
@@ -127,7 +169,7 @@ def load_threshold(threshold_path: Path, default_threshold: float = 0.65) -> flo
     return default_threshold
 
 def execute_trade(direction: str, current_position: str):
-    global entry_price, cooldown_candles
+    global entry_price, entry_time, cooldown_candles
     try:
         if direction == 'LONG' and current_position == 'FLAT':
             if not has_sufficient_balance():
@@ -136,6 +178,7 @@ def execute_trade(direction: str, current_position: str):
             order = safe_fetch(lambda: exchange.create_market_buy_order(SYMBOL, TRADE_SIZE))
             if order:
                 entry_price = order.get('average') or order.get('price')
+                entry_time = utc_now_iso()
                 if entry_price:
                     place_stop_loss(entry_price)
                 else:
@@ -147,9 +190,28 @@ def execute_trade(direction: str, current_position: str):
             exit_price = None
             if order:
                 exit_price = order.get('average') or order.get('price')
-            if entry_price and exit_price and exit_price < entry_price:
-                cooldown_candles = 3
+            if entry_price and exit_price:
+                pnl = (exit_price - entry_price) * TRADE_SIZE
+                pnl_pct = (exit_price - entry_price) / entry_price
+                payload = {
+                    "trade_id": entry_time or utc_now_iso(),
+                    "symbol": SYMBOL,
+                    "side": "LONG",
+                    "size": TRADE_SIZE,
+                    "entry_time": entry_time,
+                    "entry_price": round(entry_price, 8),
+                    "exit_time": utc_now_iso(),
+                    "exit_price": round(exit_price, 8),
+                    "pnl": round(pnl, 8),
+                    "pnl_pct": round(pnl_pct * 100, 6),
+                }
+                record_trade(payload)
+                if exit_price < entry_price:
+                    cooldown_candles = 3
+            else:
+                logging.warning("[TRADE] Missing entry or exit price; trade not recorded.")
             entry_price = None
+            entry_time = None
             return 'FLAT'
     except Exception as e:
         logging.error(f"[API ERROR] Failed to execute trade: {e}")
@@ -176,6 +238,7 @@ def run_live_inference(model, timeframe: str):
     prob_up = model.predict_proba(X_live)[-1][1]
     
     logging.info(f"[{timeframe}] Model Confidence for UP: {prob_up * 100:.2f}%")
+    record_signal(timeframe, prob_up)
     return prob_up
 
 def load_models():

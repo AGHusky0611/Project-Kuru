@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Kuru Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+          <h1>Project Kuru</h1>
+          <p>Read-only performance dashboard</p>
+        </div>
+      </div>
+      <div class="controls">
+        <input id="searchInput" type="search" placeholder="Search trades" />
+        <button id="refreshBtn">Refresh</button>
+      </div>
+    </header>
+
+    <section class="kpis">
+      <div class="kpi-card">
+        <span class="kpi-label">Total Trades</span>
+        <strong id="kpiTotal">0</strong>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Win Rate</span>
+        <strong id="kpiWinRate">0%</strong>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">ROI</span>
+        <strong id="kpiRoi">0%</strong>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Total PnL</span>
+        <strong id="kpiPnl">0</strong>
+      </div>
+    </section>
+
+    <section class="charts">
+      <div class="chart-card">
+        <h2>Equity Curve</h2>
+        <canvas id="equityChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <h2>Signal Confidence</h2>
+        <canvas id="signalChart"></canvas>
+      </div>
+    </section>
+
+    <section class="table-section">
+      <div class="table-header">
+        <h2>Trades</h2>
+        <div class="table-actions">
+          <button id="exportCsvBtn">Export CSV</button>
+          <button id="exportJsonBtn">Export JSON</button>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Exit Time</th>
+              <th>Side</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>PnL</th>
+              <th>PnL %</th>
+            </tr>
+          </thead>
+          <tbody id="tradesTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span id="lastUpdated">Last updated: --</span>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,6 +1,8 @@
 ccxt
+fastapi
 numpy
 pandas
 pandas_ta
 scikit-learn
+uvicorn
 xgboost

@@ -1,0 +1,164 @@
+:root {
+  --bg: #0b0f1a;
+  --panel: #131a2a;
+  --accent: #00d19a;
+  --accent-2: #ffb84d;
+  --text: #e5ebff;
+  --muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #162037, #0b0f1a 55%);
+  color: var(--text);
+  padding: 32px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  background: conic-gradient(from 45deg, var(--accent), #2dd4bf, #22d3ee, var(--accent));
+  border-radius: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+}
+
+input[type="search"] {
+  background: var(--panel);
+  border: 1px solid #1f2a44;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  min-width: 220px;
+}
+
+button {
+  background: var(--accent);
+  border: none;
+  color: #08121b;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.kpi-card {
+  background: var(--panel);
+  border: 1px solid #1f2a44;
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.kpi-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kpi-card strong {
+  font-size: 22px;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.chart-card {
+  background: var(--panel);
+  border: 1px solid #1f2a44;
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.table-section {
+  background: var(--panel);
+  border: 1px solid #1f2a44;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.table-actions button {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  margin-left: 8px;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 8px;
+  font-size: 14px;
+  border-bottom: 1px solid #1f2a44;
+}
+
+.footer {
+  margin-top: 24px;
+  color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 20px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .controls {
+    width: 100%;
+  }
+
+  input[type="search"] {
+    flex: 1;
+  }
+}

@@ -1,10 +1,17 @@
 import time
+import logging
 import ccxt
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from xgboost import XGBClassifier
 from SupportModels.TechnicalIndicators import engineer_live_features
+
+logging.basicConfig(
+    filename="kuru.log",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 # 1. Initialize Exchange (Use Testnet for safety)
 exchange = ccxt.binance({
@@ -15,108 +22,219 @@ exchange = ccxt.binance({
 exchange.set_sandbox_mode(True) 
 
 SYMBOL = 'BTC/USDT'
-TRADE_SIZE = 0.01 
+TRADE_SIZE = 0.01
+
+starting_balance = None
+cooldown_candles = 0
+entry_price = None
+
+def safe_fetch(fn, retries=3):
+    for i in range(retries):
+        try:
+            return fn()
+        except Exception as e:
+            logging.warning(f"[RETRY {i + 1}] {e}")
+            time.sleep(2 ** i)
+    return None
+
+def has_sufficient_balance(min_usdt=20):
+    balance = safe_fetch(exchange.fetch_balance)
+    if not balance:
+        return False
+    usdt = balance.get('USDT', {}).get('free', 0)
+    if usdt < min_usdt:
+        logging.info(f"[SKIP] Insufficient balance: {usdt} USDT")
+        return False
+    return True
+
+def check_drawdown(max_drawdown=0.05):
+    global starting_balance
+    balance = safe_fetch(exchange.fetch_balance)
+    if not balance:
+        return False
+    current = balance.get('USDT', {}).get('total', 0)
+    if starting_balance is None:
+        starting_balance = current
+        return False
+    if starting_balance == 0:
+        return False
+    drawdown = (starting_balance - current) / starting_balance
+    if drawdown > max_drawdown:
+        logging.error(f"[KILL SWITCH] Drawdown {drawdown * 100:.1f}% exceeded limit. Shutting down.")
+        return True
+    return False
+
+def should_skip_due_to_cooldown():
+    global cooldown_candles
+    if cooldown_candles > 0:
+        logging.info(f"[COOLDOWN] Skipping. {cooldown_candles} candles remaining.")
+        cooldown_candles -= 1
+        return True
+    return False
+
+def place_stop_loss(entry_price_value):
+    stop_price = entry_price_value * 0.98
+    safe_fetch(lambda: exchange.create_order(
+        SYMBOL,
+        'stop',
+        'sell',
+        TRADE_SIZE,
+        stop_price,
+        {'stopPrice': stop_price}
+    ))
+    logging.info(f"[STOP-LOSS] Placed at {stop_price:.2f}")
+
+def sync_startup_state():
+    logging.info("[STARTUP] Syncing position state from exchange...")
+    try:
+        balance = exchange.fetch_balance()
+        btc_held = balance.get('BTC', {}).get('free', 0)
+        if btc_held > 0.001:
+            logging.info("[STARTUP] Found existing BTC position. Recovering as LONG.")
+            return "LONG"
+        logging.info("[STARTUP] No open position found. Starting FLAT.")
+        return "FLAT"
+    except Exception as e:
+        logging.warning(f"[STARTUP WARN] Could not sync state: {e}. Defaulting to FLAT.")
+        return "FLAT"
+
+def seconds_until_next_candle(interval_minutes):
+    now = datetime.now()
+    total_seconds = interval_minutes * 60
+    elapsed = (now.minute % interval_minutes) * 60 + now.second
+    return total_seconds - elapsed
 
 def fetch_live_data(timeframe: str) -> pd.DataFrame:
-    bars = exchange.fetch_ohlcv(SYMBOL, timeframe, limit=50)
-    
+    bars = safe_fetch(lambda: exchange.fetch_ohlcv(SYMBOL, timeframe, limit=50))
+    if not bars:
+        return pd.DataFrame()
+
     df = pd.DataFrame(bars, columns=['Open time', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Open time'] = pd.to_datetime(df['Open time'], unit='ms')
     df = df.set_index('Open time')
-    
-    df['Number of trades'] = 1000 
-    df['Taker buy base asset volume'] = df['Volume'] * 0.5 
-    df['Taker buy quote asset volume'] = df['Volume'] * df['Close'] * 0.5
-    
+
     return df
 
-def execute_trade(direction: str):
+def execute_trade(direction: str, current_position: str):
+    global entry_price, cooldown_candles
     try:
-        if direction == 'LONG':
-            print(f"[EXECUTING] Market BUY {TRADE_SIZE} {SYMBOL}")
-            exchange.create_market_buy_order(SYMBOL, TRADE_SIZE)
+        if direction == 'LONG' and current_position == 'FLAT':
+            if not has_sufficient_balance():
+                return current_position
+            logging.info(f"[EXECUTING] Market BUY {TRADE_SIZE} {SYMBOL}")
+            order = safe_fetch(lambda: exchange.create_market_buy_order(SYMBOL, TRADE_SIZE))
+            if order:
+                entry_price = order.get('average') or order.get('price')
+                if entry_price:
+                    place_stop_loss(entry_price)
+                else:
+                    logging.warning("[STOP-LOSS] Entry price unavailable; stop-loss not placed.")
+            return 'LONG'
+        if direction == 'FLAT' and current_position == 'LONG':
+            logging.info(f"[EXECUTING] Market SELL {TRADE_SIZE} {SYMBOL}")
+            order = safe_fetch(lambda: exchange.create_market_sell_order(SYMBOL, TRADE_SIZE))
+            exit_price = None
+            if order:
+                exit_price = order.get('average') or order.get('price')
+            if entry_price and exit_price and exit_price < entry_price:
+                cooldown_candles = 3
+            entry_price = None
+            return 'FLAT'
     except Exception as e:
-        print(f"[API ERROR] Failed to execute trade: {e}")
+        logging.error(f"[API ERROR] Failed to execute trade: {e}")
+    return current_position
 
 def run_live_inference(model, timeframe: str):
-    print(f"Fetching live {timeframe} data...")
+    logging.info(f"Fetching live {timeframe} data...")
     raw_df = fetch_live_data(timeframe)
+    if raw_df.empty:
+        logging.warning(f"[{timeframe}] No data fetched.")
+        return None
     
     live_features = engineer_live_features(raw_df)
+    if live_features.empty:
+        logging.warning(f"[{timeframe}] No live features available.")
+        return None
     
-    exclude_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'Number of trades', 'Taker buy base asset volume', 'Taker buy quote asset volume']
+    exclude_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
     X_live = live_features.drop(columns=[c for c in exclude_cols if c in live_features.columns])
+    if X_live.empty:
+        logging.warning(f"[{timeframe}] No model inputs available.")
+        return None
     
-    prob_up = model.predict_proba(X_live)
+    prob_up = model.predict_proba(X_live)[-1][1]
     
-    print(f"[{timeframe}] Model Confidence for UP: {prob_up * 100:.2f}%")
-    
-    if prob_up > 0.60:
-        print(f"[{timeframe}] HIGH CONFIDENCE BULLISH SIGNAL DETECTED.")
-        execute_trade('LONG')
-    else:
-        print(f"[{timeframe}] No trade conditions met. Standing by.")
+    logging.info(f"[{timeframe}] Model Confidence for UP: {prob_up * 100:.2f}%")
+    return prob_up
 
 def load_models():
     BASE_DIR = Path(__file__).resolve().parent
     model_dir = (BASE_DIR / "Models").resolve()
     
-    print("Loading Project Kuru AI Models...")
+    logging.info("Loading Project Kuru AI Models...")
     model_15m, model_1h = None, None
     
     path_15m = model_dir / "kuru_live_model_15m.json"
     if path_15m.exists():
         model_15m = XGBClassifier()
         model_15m.load_model(str(path_15m))
-        print("[OK] 15-Minute Model loaded successfully.")
+        logging.info("[OK] 15-Minute Model loaded successfully.")
     else:
-        print("[WARN] 15-Minute Model not found. Skipping 15m execution.")
+        logging.warning("[WARN] 15-Minute Model not found. Skipping 15m execution.")
 
     path_1h = model_dir / "kuru_live_model_1h.json"
     if path_1h.exists():
         model_1h = XGBClassifier()
         model_1h.load_model(str(path_1h))
-        print("[OK] 60-Minute Model loaded successfully.")
+        logging.info("[OK] 60-Minute Model loaded successfully.")
     else:
-        print("[WARN] 60-Minute Model not found. Skipping 1h execution.")
+        logging.warning("[WARN] 60-Minute Model not found. Skipping 1h execution.")
         
     return model_15m, model_1h
 
 def execute_15m_model(model):
     if model is None: 
-        return
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] --> Firing 15-Minute Sniper Model")
-    run_live_inference(model, '15m')
+        return None
+    logging.info(f"[{datetime.now().strftime('%H:%M:%S')}] --> Firing 15-Minute Sniper Model")
+    return run_live_inference(model, '15m')
 
 def execute_60m_model(model):
     if model is None: 
-        return
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] --> Firing 60-Minute Trend Model")
-    run_live_inference(model, '1h')
+        return None
+    logging.info(f"[{datetime.now().strftime('%H:%M:%S')}] --> Firing 60-Minute Trend Model")
+    return run_live_inference(model, '1h')
 
 def run_kuru_orchestrator():
-    print("Initializing Project Kuru Orchestrator...")
+    logging.info("Initializing Project Kuru Orchestrator...")
     model_15m, model_1h = load_models()
+    current_position = sync_startup_state()
+    last_prob_1h = None
     
     if model_15m is None and model_1h is None:
-        print("[ERROR] No models found. Run train.py first. Exiting.")
+        logging.error("[ERROR] No models found. Run train.py first. Exiting.")
         return
         
-    print("System active. Waiting for next candle close...")
+    logging.info("System active. Waiting for next candle close...")
     
     while True:
-        current_time = datetime.now()
-        
-        if current_time.second == 0:
-            if current_time.minute % 15 == 0:
-                execute_15m_model(model_15m)
-                
-            if current_time.minute == 0:
-                execute_60m_model(model_1h)
-                
-            time.sleep(60)
-        else:
-            time.sleep(1)
+        if check_drawdown():
+            return
+
+        sleep_15m = seconds_until_next_candle(15)
+        time.sleep(sleep_15m)
+
+        prob_15m = execute_15m_model(model_15m)
+        if datetime.now().minute == 0:
+            last_prob_1h = execute_60m_model(model_1h)
+
+        if should_skip_due_to_cooldown():
+            continue
+
+        if prob_15m is None or last_prob_1h is None:
+            continue
+
+        if prob_15m > 0.65 and last_prob_1h > 0.65:
+            current_position = execute_trade('LONG', current_position)
 
 if __name__ == "__main__":
     run_kuru_orchestrator()

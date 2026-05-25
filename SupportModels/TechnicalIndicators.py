@@ -7,10 +7,6 @@ def engineer_kuru_features(input_path: Path, output_path: Path, noise_threshold:
     df = pd.read_csv(input_path, index_col='Open time', parse_dates=True)
     df = df[~df.index.duplicated(keep='last')]
 
-    df['Buyer_Aggression'] = df['Taker buy base asset volume'] / df['Volume']
-    df['Avg_Trade_Size'] = df['Volume'] / df['Number of trades']
-    taker_avg_price = df['Taker buy quote asset volume'] / df['Taker buy base asset volume']
-    df['Taker_Price_Premium'] = taker_avg_price - df['Close']
     df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
     df.ta.ema(length=9, append=True)
@@ -43,10 +39,6 @@ def engineer_kuru_features(input_path: Path, output_path: Path, noise_threshold:
     return df
 
 def engineer_live_features(df: pd.DataFrame) -> pd.DataFrame:
-    df['Buyer_Aggression'] = df['Taker buy base asset volume'] / df['Volume']
-    df['Avg_Trade_Size'] = df['Volume'] / df['Number of trades']
-    taker_avg_price = df['Taker buy quote asset volume'] / df['Taker buy base asset volume']
-    df['Taker_Price_Premium'] = taker_avg_price - df['Close']
     df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
     df.ta.ema(length=9, append=True)

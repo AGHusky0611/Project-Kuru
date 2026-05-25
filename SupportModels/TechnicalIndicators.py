@@ -25,7 +25,7 @@ def engineer_kuru_features(input_path: Path, output_path: Path, noise_threshold:
     df['DayOfWeek'] = df.index.dayofweek
 
     # Stronger filters for win rate
-    df['ATR_Pct'] = df['ATR_14'] / df['Close']
+    df['ATR_Pct'] = df['ATRr_14'] / df['Close']
     df['Vol_Z'] = (df['Volume'] - df['Volume'].rolling(20).mean()) / df['Volume'].rolling(20).std()
 
     df['Next_Return'] = df['Return'].shift(-1)
@@ -56,7 +56,7 @@ def engineer_live_features(df: pd.DataFrame) -> pd.DataFrame:
     df['Hour'] = df.index.hour
     df['DayOfWeek'] = df.index.dayofweek
 
-    df['ATR_Pct'] = df['ATR_14'] / df['Close']
+    df['ATR_Pct'] = df['ATRr_14'] / df['Close']
     df['Vol_Z'] = (df['Volume'] - df['Volume'].rolling(20).mean()) / df['Volume'].rolling(20).std()
 
     df = df.drop(columns=['Return'])

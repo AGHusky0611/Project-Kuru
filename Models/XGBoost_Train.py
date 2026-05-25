@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -7,6 +8,9 @@ from sklearn.metrics import accuracy_score, classification_report
 
 def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str, param_grid: dict, n_iter: int):
     df = pd.read_csv(features_path, index_col='Open time', parse_dates=True)
+
+    if not model_name.endswith('.json'):
+        model_name = f"{model_name}.json"
 
     exclude_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'Quote asset volume', 'Number of trades', 'Taker buy base asset volume', 'Taker buy quote asset volume', 'Close time', 'Target']
     feature_cols = [col for col in df.columns if col not in exclude_cols]
@@ -90,6 +94,10 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str,
     model_path.parent.mkdir(parents=True, exist_ok=True)
     final_model.save_model(str(model_path))
 
+    threshold_path = model_path.with_name(model_path.stem + "_threshold.json")
+    with threshold_path.open('w') as handle:
+        json.dump({'threshold': best_thr}, handle)
+
     return final_model
 
 grid_15m = {
@@ -104,10 +112,30 @@ grid_15m = {
     "reg_lambda": [1, 2],
 }
 
+grid_1h = {
+    "n_estimators": [200, 400, 600],
+    "max_depth": [2, 3, 4],
+    "learning_rate": [0.01, 0.05],
+    "subsample": [0.6, 0.8],
+    "colsample_bytree": [0.6, 0.8],
+    "min_child_weight": [5, 10],
+    "gamma": [0, 0.5, 1],
+    "reg_alpha": [0, 0.1],
+    "reg_lambda": [1, 2],
+}
+
 tune_and_train_kuru(
     features_path=Path("data/processed/15m_features.csv"),
     results_dir=Path("results/15m_kuru/"),
-    model_name="kuru_15m",
+    model_name="kuru_live_model_15m.json",
     param_grid=grid_15m,
+    n_iter=50
+)
+
+tune_and_train_kuru(
+    features_path=Path("data/processed/1h_features.csv"),
+    results_dir=Path("results/1h_kuru/"),
+    model_name="kuru_live_model_1h.json",
+    param_grid=grid_1h,
     n_iter=50
 )

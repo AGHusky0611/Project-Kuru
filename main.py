@@ -16,8 +16,8 @@ logging.basicConfig(
 
 # 1. Initialize Exchange (Use Testnet for safety)
 exchange = ccxt.binance({
-    'apiKey': 'YOUR_BINANCE_TESTNET_API_KEY',
-    'secret': 'YOUR_BINANCE_TESTNET_SECRET',
+    'apiKey': 'ZBVc7j20BwFto28WfpDon6H699G3q0rHec86ATuccDCTudLowh7yWos5dFfuUim2',
+    'secret': 'f7FCayXXY38LntKYHv5TJB0gNe4BGAujTeA2uK538B8OVsHrGpTDcsmmBBbLcfGl',
     'enableRateLimit': True,
 })
 exchange.set_sandbox_mode(True) 

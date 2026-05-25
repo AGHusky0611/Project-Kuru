@@ -6,7 +6,15 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import ParameterSampler, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, classification_report
 
-def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str, param_grid: dict, n_iter: int):
+def tune_and_train_kuru(
+    features_path: Path,
+    results_dir: Path,
+    model_name: str,
+    param_grid: dict,
+    n_iter: int,
+    threshold_max: float = 0.85,
+    min_val_trades: int = 0,
+):
     df = pd.read_csv(features_path, index_col='Open time', parse_dates=True)
 
     if not model_name.endswith('.json'):
@@ -61,10 +69,12 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str,
     final_model.fit(X_tr, y_tr, verbose=False)
 
     val_probs = final_model.predict_proba(X_val)[:, 1]
-    thresholds = np.arange(0.55, 0.85, 0.01)
+    thresholds = np.arange(0.55, threshold_max, 0.01)
     best_thr, best_prec = 0.6, 0.0
     for thr in thresholds:
         take = (val_probs > thr) | (val_probs < (1 - thr))
+        if take.sum() < min_val_trades:
+            continue
         if take.sum() == 0:
             continue
         preds = (val_probs[take] > 0.5).astype(int)
@@ -100,42 +110,48 @@ def tune_and_train_kuru(features_path: Path, results_dir: Path, model_name: str,
 
     return final_model
 
-grid_15m = {
-    "n_estimators": [200, 400, 600],
-    "max_depth": [2, 3, 4],
-    "learning_rate": [0.01, 0.05],
-    "subsample": [0.6, 0.8],
-    "colsample_bytree": [0.6, 0.8],
-    "min_child_weight": [5, 10],
-    "gamma": [0, 0.5, 1],
-    "reg_alpha": [0, 0.1],
-    "reg_lambda": [1, 2],
-}
+if __name__ == "__main__":
+    base_dir = Path(__file__).resolve().parents[1]
+    features_dir = base_dir / "Datasets" / "Clean"
 
-grid_1h = {
-    "n_estimators": [200, 400, 600],
-    "max_depth": [2, 3, 4],
-    "learning_rate": [0.01, 0.05],
-    "subsample": [0.6, 0.8],
-    "colsample_bytree": [0.6, 0.8],
-    "min_child_weight": [5, 10],
-    "gamma": [0, 0.5, 1],
-    "reg_alpha": [0, 0.1],
-    "reg_lambda": [1, 2],
-}
+    grid_15m = {
+        "n_estimators": [200, 400, 600],
+        "max_depth": [2, 3, 4],
+        "learning_rate": [0.01, 0.05],
+        "subsample": [0.6, 0.8],
+        "colsample_bytree": [0.6, 0.8],
+        "min_child_weight": [5, 10],
+        "gamma": [0, 0.5, 1],
+        "reg_alpha": [0, 0.1],
+        "reg_lambda": [1, 2],
+    }
 
-tune_and_train_kuru(
-    features_path=Path("data/processed/15m_features.csv"),
-    results_dir=Path("results/15m_kuru/"),
-    model_name="kuru_live_model_15m.json",
-    param_grid=grid_15m,
-    n_iter=50
-)
+    grid_1h = {
+        "n_estimators": [200, 400, 600, 800],
+        "max_depth": [3, 4, 5, 6],
+        "learning_rate": [0.01, 0.05],
+        "subsample": [0.6, 0.7, 0.8],
+        "colsample_bytree": [0.6, 0.8],
+        "min_child_weight": [5, 10, 20],
+        "gamma": [0, 0.5, 1, 2],
+        "reg_alpha": [0, 0.1, 0.5],
+        "reg_lambda": [1, 2, 5],
+    }
 
-tune_and_train_kuru(
-    features_path=Path("data/processed/1h_features.csv"),
-    results_dir=Path("results/1h_kuru/"),
-    model_name="kuru_live_model_1h.json",
-    param_grid=grid_1h,
-    n_iter=50
-)
+    tune_and_train_kuru(
+        features_path=features_dir / "kuru_features_btc_15m.csv",
+        results_dir=Path("results/15m_kuru/"),
+        model_name="kuru_live_model_15m.json",
+        param_grid=grid_15m,
+        n_iter=50,
+    )
+
+    tune_and_train_kuru(
+        features_path=features_dir / "kuru_features_btc_1h.csv",
+        results_dir=Path("results/1h_kuru/"),
+        model_name="kuru_live_model_1h.json",
+        param_grid=grid_1h,
+        n_iter=100,
+        threshold_max=0.75,
+        min_val_trades=30,
+    )

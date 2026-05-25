@@ -45,13 +45,17 @@ class KuruMasterTrainer:
         self.train_timeframe("15m", "btc_15m_data_2018_to_2025.csv", 0.001, grid_15m, 10)
 
         grid_60m = {
-        "n_estimators": [100, 200, 300],
-        "max_depth": [2, 3, 4, 5],
-        "learning_rate": [0.01, 0.05, 0.1],
-        "subsample": [0.6, 0.8],
+        "n_estimators": [200, 400, 600, 800],
+        "max_depth": [3, 4, 5, 6],
+        "learning_rate": [0.01, 0.05],
+        "subsample": [0.6, 0.7, 0.8],
         "colsample_bytree": [0.6, 0.8],
+        "min_child_weight": [5, 10, 20],
+        "gamma": [0, 0.5, 1, 2],
+        "reg_alpha": [0, 0.1, 0.5],
+        "reg_lambda": [1, 2, 5],
     }
-        self.train_timeframe("1h", "btc_1h_data_2018_to_2025.csv", 0.002, grid_60m, 10)
+        self.train_timeframe("1h", "btc_1h_data_2018_to_2025.csv", 0.002, grid_60m, 100)
 
 if __name__ == "__main__":
     trainer = KuruMasterTrainer()
